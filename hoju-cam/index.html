@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#05060f">
+<style>*{box-sizing:border-box}body{margin:0}</style>
+<title>宝珠カメラ</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@700&family=Zen+Kaku+Gothic+New:wght@500;700&display=swap">
+</head>
+<body>
+<style>
+/* Layout: one full-height camera screen (phone-width column, centered on desktop); controls float over the live canvas. Single deliberate night look. */
+:root{
+  --night:#05060f; --glass:rgba(255,255,255,.14); --glass-line:rgba(255,255,255,.22);
+  --ink:#f3f1fb; --mute:#b9bbd8; --gold:#e7c27a; --gold-ink:#221a08;
+  --display:"Shippori Mincho","Hiragino Mincho ProN","Yu Mincho",serif;
+  --body:"Zen Kaku Gothic New","Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{background:var(--night);color:var(--ink);font-family:var(--body);overflow:hidden;-webkit-user-select:none;user-select:none}
+.app{position:relative;height:100%;max-width:520px;margin:0 auto;overflow:hidden;background:#000}
+@media (min-width:700px){.app{box-shadow:0 0 0 1px #1d2040,0 0 120px -40px #9fc4ff}}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:crosshair}
+.top{position:absolute;top:0;left:0;right:0;padding:14px 16px;padding-top:calc(14px + env(safe-area-inset-top,0px));display:flex;justify-content:space-between;align-items:flex-start;gap:12px;pointer-events:none;background:linear-gradient(#000a,transparent)}
+.brand{font-family:var(--display);font-size:20px;letter-spacing:.06em;line-height:1.2}
+.brand small{display:block;font-family:var(--body);font-size:11px;color:var(--mute);letter-spacing:.02em;font-weight:500;margin-top:2px}
+.src{font-size:11px;color:var(--mute);text-align:right;line-height:1.5}
+.bottom{position:absolute;left:0;right:0;bottom:0;padding:14px 16px;padding-bottom:calc(20px + env(safe-area-inset-bottom,0px));display:grid;gap:14px;background:linear-gradient(transparent,#000c 40%)}
+.row{display:flex;justify-content:center;gap:8px;flex-wrap:wrap}
+.chip{font:inherit;font-size:12px;font-weight:500;color:var(--ink);background:var(--glass);border:1px solid var(--glass-line);border-radius:999px;padding:6px 14px;cursor:pointer;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.chip[aria-pressed="true"]{background:var(--gold);color:var(--gold-ink);border-color:var(--gold)}
+.chip:focus-visible,.round:focus-visible,.shutter:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.label{font-size:10px;color:var(--mute);letter-spacing:.08em;align-self:center;margin-right:2px}
+.controls{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
+.round{justify-self:start;width:48px;height:48px;border-radius:50%;border:1px solid var(--glass-line);background:var(--glass);color:var(--ink);font:inherit;font-size:11px;cursor:pointer;display:grid;place-items:center;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.round.right{justify-self:end}
+.shutter{width:74px;height:74px;border-radius:50%;border:4px solid #fff;background:rgba(255,255,255,.2);cursor:pointer;transition:transform .12s}
+.shutter:active{transform:scale(.92)}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .45s}
+.flash.on{opacity:.65;transition:none}
+.toast{position:absolute;left:50%;top:84px;transform:translateX(-50%);font-size:12px;background:rgba(10,12,30,.8);border:1px solid var(--glass-line);padding:8px 14px;border-radius:999px;white-space:nowrap;opacity:0;transition:opacity .3s;pointer-events:none;max-width:calc(100% - 32px);overflow:hidden;text-overflow:ellipsis}
+.toast.show{opacity:1}
+.hint{position:absolute;left:0;right:0;top:46%;text-align:center;font-size:13px;color:var(--ink);text-shadow:0 1px 8px #000;pointer-events:none;transition:opacity .8s}
+.hint.gone{opacity:0}
+input[type=file]{display:none}
+@media (prefers-reduced-motion:reduce){.shutter,.flash,.toast,.hint{transition:none}}
+</style>
+
+<div class="app" id="app">
+  <canvas id="cv" aria-label="宝珠の網。タップで波紋、ドラッグで傾き"></canvas>
+  <div class="flash" id="flash"></div>
+  <div class="top">
+    <div class="brand">宝珠カメラ<small>ブラウザ試作版</small></div>
+    <div class="src" id="srcLabel">デモの景色</div>
+  </div>
+  <div class="hint" id="hint">触ると波紋、なぞると網が傾きます</div>
+  <div class="toast" id="toast" role="status"></div>
+  <div class="bottom">
+    <div class="row" role="group" aria-label="見え方">
+      <span class="label">見え方</span>
+      <button class="chip" data-preset="0" aria-pressed="true">水晶</button>
+      <button class="chip" data-preset="1" aria-pressed="false">金属</button>
+      <button class="chip" data-preset="2" aria-pressed="false">水滴</button>
+    </div>
+    <div class="row" role="group" aria-label="粒の数">
+      <span class="label">粒の数</span>
+      <button class="chip" data-cols="4" aria-pressed="false">大</button>
+      <button class="chip" data-cols="6" aria-pressed="true">中</button>
+      <button class="chip" data-cols="10" aria-pressed="false">小</button>
+    </div>
+    <div class="controls">
+      <button class="round" id="pick" aria-label="写真か動画を映す">写真</button>
+      <button class="shutter" id="shoot" aria-label="撮影して保存"></button>
+      <button class="round right" id="cam" aria-label="カメラを使う／前後を切り替える">カメラ</button>
+    </div>
+  </div>
+  <input type="file" id="file" accept="image/*,video/*">
+</div>
+
+<script>
+(()=>{
+const cv=document.getElementById('cv');
+const gl=cv.getContext('webgl2',{preserveDrawingBuffer:true,antialias:false});
+const toastEl=document.getElementById('toast');
+let toastTimer;
+function toast(msg){toastEl.textContent=msg;toastEl.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toastEl.classList.remove('show'),2600);}
+if(!gl){toast('このブラウザでは WebGL2 が使えません');return;}
+
+/* ---------- shaders (iOS版 Shaders.metal と同じ考え方) ---------- */
+const VS=`#version 300 es
+void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);gl_Position=vec4(p*2.0-1.0,0.0,1.0);}`;
+const FS_HOJU=`#version 300 es
+precision highp float;
+uniform vec2 uRes; uniform vec2 uTilt; uniform float uTime; uniform float uCell; uniform float uSrcAspect; uniform int uPreset; uniform int uRippleCount; uniform int uMirror;
+uniform vec4 uRipples[8];
+uniform sampler2D uSrc; uniform sampler2D uPrev;
+out vec4 outColor;
+vec2 nearestCenter(vec2 p,float s){
+  float rowH=s*0.866; float r0=floor(p.y/rowH); vec2 best=vec2(0.0); float bd=1e9;
+  for(int k=-1;k<=1;k++){float r=r0+float(k); float off=mod(abs(r),2.0)*0.5*s; float col=floor((p.x-off)/s+0.5);
+    vec2 c=vec2(col*s+off,r*rowH+rowH*0.5); float d=distance(p,c); if(d<bd){bd=d;best=c;}}
+  return best;
+}
+vec2 aspectFill(vec2 uv,float sa,float ca){vec2 q=uv-0.5; if(ca>sa)q.x*=sa/ca; else q.y*=ca/sa; return q+0.5;}
+void main(){
+  vec2 p=vec2(gl_FragCoord.x,uRes.y-gl_FragCoord.y);          // 左上原点のピクセル座標
+  vec2 c=nearestCenter(p,uCell);
+  float sa=uRes.x/uRes.y;
+  float k=0.0, speed=uRes.x*0.9, band=uRes.x*0.2;
+  for(int i=0;i<8;i++){ if(i>=uRippleCount)break;
+    float age=uTime-uRipples[i].z; float ph=age*speed-distance(c,uRipples[i].xy);
+    if(ph>0.0&&ph<band)k+=sin(ph/band*3.14159265)*max(0.0,1.0-age/2.6);}
+  float R=uCell*0.47*(1.0+k*0.18);
+  vec2 l=(p-c)/R; float r2=dot(l,l);
+  if(r2>1.0){outColor=vec4(0.02,0.024,0.06,1.0);return;}
+  float z=sqrt(1.0-r2);
+  vec2 fish=l/(1.0+z*0.6);
+  vec2 suv=c/uRes;
+  vec2 shift=(suv-0.5)*0.3+uTilt*0.2;
+  vec2 sceneUV; vec3 tint=vec3(1.0); float netMix=0.5;
+  if(uPreset==1){ sceneUV=0.5+vec2(fish.x,fish.y*sa)*0.75+shift; tint=vec3(1.0,0.86,0.62); netMix=0.7; }
+  else if(uPreset==2){ sceneUV=suv+fish*(uCell/uRes)*1.4+uTilt*0.05; tint=vec3(0.85,0.95,1.05); netMix=0.35; }
+  else { sceneUV=0.5-vec2(fish.x,fish.y*sa)*0.75+shift; }
+  if(uMirror==1)sceneUV.x=1.0-sceneUV.x;
+  vec3 col=texture(uSrc,clamp(aspectFill(sceneUV,sa,uSrcAspect),0.0,1.0)).rgb*tint;
+  // 中心に前のフレーム（網全体）を小さく映す → 毎フレーム繰り返して無限反射
+  float inner=0.48;
+  float w=(1.0-smoothstep(inner*0.7,inner,length(l)))*netMix;
+  vec2 netUV=0.5+fish/inner*0.5+uTilt*0.03;
+  col=mix(col,texture(uPrev,vec2(netUV.x,1.0-netUV.y)).rgb,w);
+  col*=mix(0.25,1.0,pow(z,0.6));
+  vec2 hl=l-vec2(-0.35,-0.42);
+  col+=vec3(1.0)*exp(-dot(hl,hl)*16.0)*(0.55+k*0.4);
+  col+=vec3(0.75,0.88,1.0)*pow(1.0-z,3.0)*0.25;
+  col+=vec3(0.91,0.76,0.48)*k*0.35;
+  outColor=vec4(clamp(col,0.0,1.0),1.0);
+}`;
+const FS_COPY=`#version 300 es
+precision highp float; uniform sampler2D uTex; uniform vec2 uRes; out vec4 o;
+void main(){o=texture(uTex,gl_FragCoord.xy/uRes);}`;
+
+function prog(fs){
+  const mk=(t,s)=>{const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(sh));return sh;};
+  const p=gl.createProgram();gl.attachShader(p,mk(gl.VERTEX_SHADER,VS));gl.attachShader(p,mk(gl.FRAGMENT_SHADER,fs));gl.linkProgram(p);
+  if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));
+  const u={};const n=gl.getProgramParameter(p,gl.ACTIVE_UNIFORMS);
+  for(let i=0;i<n;i++){const info=gl.getActiveUniform(p,i);const name=info.name.replace(/\[0\]$/,'');u[name]=gl.getUniformLocation(p,info.name);}
+  return {p,u};
+}
+let hoju,copy;
+try{hoju=prog(FS_HOJU);copy=prog(FS_COPY);}catch(e){toast('描画の準備に失敗しました');console.error(e);return;}
+gl.bindVertexArray(gl.createVertexArray());
+
+/* ---------- textures ---------- */
+function makeTex(){const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);return t;}
+const srcTex=makeTex();
+let fb=[];
+function resize(){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  const w=Math.max(1,Math.round(cv.clientWidth*dpr)),h=Math.max(1,Math.round(cv.clientHeight*dpr));
+  if(cv.width===w&&cv.height===h&&fb.length)return;
+  cv.width=w;cv.height=h;
+  fb.forEach(f=>{gl.deleteTexture(f.tex);gl.deleteFramebuffer(f.fbo);});
+  fb=[0,1].map(()=>{const tex=makeTex();gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+    const fbo=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,tex,0);
+    gl.clearColor(0.02,0.024,0.06,1);gl.clear(gl.COLOR_BUFFER_BIT);return {tex,fbo};});
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+}
+new ResizeObserver(resize).observe(cv);
+
+/* ---------- sources: demo scene / photo / video / camera ---------- */
+const demo=document.createElement('canvas');demo.width=540;demo.height=960;const d=demo.getContext('2d');
+function drawDemo(t){
+  const W=540,H=960;
+  const g=d.createLinearGradient(0,0,0,H);g.addColorStop(0,'#2b3c9e');g.addColorStop(.5,'#e98aa8');g.addColorStop(.72,'#ffc27a');g.addColorStop(1,'#1d1530');
+  d.fillStyle=g;d.fillRect(0,0,W,H);
+  d.fillStyle='#ffe2a8';d.beginPath();d.arc(W*.72,H*.6+Math.sin(t/3000)*6,W*.09,0,7);d.fill();
+  d.fillStyle='#1b1636';for(const[x,y,bw]of[[0,.62,.14],[.12,.55,.1],[.22,.66,.12],[.34,.5,.08],[.42,.6,.14],[.84,.57,.16]])d.fillRect(x*W,y*H,bw*W,H);
+  d.beginPath();d.moveTo(W*.58,H*.72);d.lineTo(W*.64,H*.32);d.lineTo(W*.7,H*.72);d.fill();
+  for(let i=0;i<46;i++){const on=.55+.45*Math.sin(t/400+i*1.7);d.fillStyle=`hsla(${35+(i*7)%60},100%,72%,${on})`;d.fillRect(((i*53)%100)/100*W,H*(.6+((i*29)%30)/100),5,5);}
+  const fx=W*.3+Math.sin(t/1600)*W*.05,fy=H*.7;
+  d.fillStyle='#0e0a1e';d.beginPath();d.ellipse(fx,H*1.02,W*.24,H*.22,0,0,7);d.fill();
+  d.fillStyle='#ffd0b0';d.beginPath();d.arc(fx,fy,W*.1,0,7);d.fill();
+  d.fillStyle='#0e0a1e';d.beginPath();d.arc(fx,fy-H*.04,W*.105,Math.PI*1.02,Math.PI*1.98);d.fill();
+  const blink=(t%4000)<150;d.fillStyle='#3a2030';
+  if(blink){d.fillRect(fx-W*.04,fy+3,10,2);d.fillRect(fx+W*.02,fy+3,10,2);}else{d.beginPath();d.arc(fx-W*.03,fy+4,4,0,7);d.arc(fx+W*.03,fy+4,4,0,7);d.fill();}
+  d.strokeStyle='#3a2030';d.lineWidth=3;d.beginPath();d.arc(fx,fy+14,W*.03,.2,Math.PI-.2);d.stroke();
+}
+let source={kind:'demo',el:demo,aspect:540/960};
+const srcLabel=document.getElementById('srcLabel');
+function setSource(s,label){if(s.kind!=='camera')camBtn.textContent='カメラ';if(source.kind==='video'&&source.el!==s.el){source.el.pause();if(source.url)URL.revokeObjectURL(source.url);}
+  if(source.kind==='camera'&&source.stream!==s.stream)source.stream.getTracks().forEach(t=>t.stop());
+  source=s;srcLabel.textContent=label;}
+
+const fileIn=document.getElementById('file');
+document.getElementById('pick').onclick=()=>fileIn.click();
+fileIn.onchange=()=>{
+  const f=fileIn.files[0];fileIn.value='';if(!f)return;
+  const url=URL.createObjectURL(f);
+  if(f.type.startsWith('video/')){
+    const v=document.createElement('video');v.muted=true;v.loop=true;v.playsInline=true;v.src=url;
+    v.onloadeddata=()=>{v.play().catch(()=>{});setSource({kind:'video',el:v,aspect:v.videoWidth/v.videoHeight,url},'あなたの動画');};
+    v.onerror=()=>toast('この動画は読み込めませんでした');
+  }else{
+    const img=new Image();img.onload=()=>{setSource({kind:'image',el:img,aspect:img.naturalWidth/img.naturalHeight,uploaded:false},'あなたの写真');URL.revokeObjectURL(url);};
+    img.onerror=()=>toast('この画像は読み込めませんでした');img.src=url;
+  }
+};
+const camBtn=document.getElementById('cam');
+let facing='environment',starting=false;
+async function startCamera(quiet){
+  if(starting)return;
+  if(!navigator.mediaDevices?.getUserMedia){if(!quiet)toast('このブラウザではカメラが使えません');return;}
+  starting=true;
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:1280}},audio:false});
+    const v=document.createElement('video');v.muted=true;v.playsInline=true;v.setAttribute('playsinline','');v.srcObject=stream;
+    await new Promise(res=>{v.onloadeddata=res;});
+    await v.play().catch(()=>{});
+    setSource({kind:'camera',el:v,aspect:v.videoWidth/v.videoHeight,stream,mirror:facing==='user'},facing==='user'?'ライブカメラ（前面）':'ライブカメラ');
+    camBtn.textContent='切替';
+  }catch(e){
+    if(!quiet)toast('カメラを使えませんでした。ブラウザでカメラを許可してください');
+  }finally{starting=false;}
+}
+camBtn.onclick=()=>{
+  if(source.kind==='camera'){facing=facing==='environment'?'user':'environment';}
+  startCamera(false);
+};
+
+// 開いたらすぐカメラを試す（許可されなければデモのまま）
+startCamera(true);
+
+/* ---------- interaction ---------- */
+let preset=0,cols=6,tilt=[0,0],tiltTarget=[0,0],ripples=[];
+const t0=performance.now();
+const now=()=>(performance.now()-t0)/1000;
+document.querySelectorAll('[data-preset]').forEach(b=>b.onclick=()=>{preset=+b.dataset.preset;document.querySelectorAll('[data-preset]').forEach(x=>x.setAttribute('aria-pressed',x===b));});
+document.querySelectorAll('[data-cols]').forEach(b=>b.onclick=()=>{cols=+b.dataset.cols;document.querySelectorAll('[data-cols]').forEach(x=>x.setAttribute('aria-pressed',x===b));});
+function addRipple(e){const r=cv.getBoundingClientRect();const x=(e.clientX-r.left)/r.width*cv.width,y=(e.clientY-r.top)/r.height*cv.height;
+  if(ripples.length>=8)ripples.shift();ripples.push([x,y,now(),0]);
+  if(navigator.vibrate)try{navigator.vibrate(12);}catch(_){}}
+let down=null,lastRip=0;
+const hint=document.getElementById('hint');
+cv.addEventListener('pointerdown',e=>{down=[e.clientX,e.clientY];addRipple(e);lastRip=performance.now();hint.classList.add('gone');cv.setPointerCapture(e.pointerId);});
+cv.addEventListener('pointermove',e=>{if(!down)return;const r=cv.getBoundingClientRect();
+  tiltTarget=[Math.max(-1,Math.min(1,(e.clientX-down[0])/r.width*2.5)),Math.max(-1,Math.min(1,(e.clientY-down[1])/r.height*2.5))];
+  if(performance.now()-lastRip>180){addRipple(e);lastRip=performance.now();}});
+const up=()=>{down=null;tiltTarget=[0,0];};
+cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+setTimeout(()=>hint.classList.add('gone'),6000);
+
+/* ---------- save ---------- */
+let downloads=null;
+window.claude?.use?.('downloads').then(ns=>{downloads=ns;}).catch(()=>{});
+const flash=document.getElementById('flash');
+document.getElementById('shoot').onclick=()=>{
+  flash.classList.add('on');requestAnimationFrame(()=>requestAnimationFrame(()=>flash.classList.remove('on')));
+  cv.toBlob(async blob=>{
+    if(!blob){toast('撮影できませんでした');return;}
+    const ts=new Date();const p=n=>String(n).padStart(2,'0');
+    const name=`hoju-${ts.getFullYear()}${p(ts.getMonth()+1)}${p(ts.getDate())}-${p(ts.getHours())}${p(ts.getMinutes())}${p(ts.getSeconds())}.png`;
+    if(!downloads){
+      // Claude の外で開いた時は、普通のダウンロードで保存する
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();
+      setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);toast('保存しました');return;
+    }
+    try{await downloads.save({filename:name,data:blob});toast('保存しました');}
+    catch(err){if(err?.code==='declined')return;if(err?.code==='rate_limited'){toast('少し待ってからもう一度押してください');return;}toast('この表示では保存できません');}
+  },'image/png');
+};
+
+/* ---------- render loop ---------- */
+let cur=0;
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+function frame(){
+  resize();
+  const t=now();
+  tilt[0]+=(tiltTarget[0]-tilt[0])*.08;tilt[1]+=(tiltTarget[1]-tilt[1])*.08;
+  ripples=ripples.filter(r=>t-r[2]<2.6);
+  if(source.kind==='demo')drawDemo(performance.now());
+  const ready=source.kind==='image'||source.kind==='demo'||source.el.readyState>=2;
+  if(ready&&(source.kind!=='image'||!source.uploaded)){
+    gl.bindTexture(gl.TEXTURE_2D,srcTex);
+    try{gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,source.el);if(source.kind==='image')source.uploaded=true;}catch(e){}
+  }
+  const target=fb[cur],prev=fb[1-cur];
+  // 1) 宝珠の網をオフスクリーンへ
+  gl.bindFramebuffer(gl.FRAMEBUFFER,target.fbo);gl.viewport(0,0,cv.width,cv.height);
+  gl.useProgram(hoju.p);const u=hoju.u;
+  gl.uniform2f(u.uRes,cv.width,cv.height);gl.uniform2f(u.uTilt,tilt[0],tilt[1]);gl.uniform1f(u.uTime,t);
+  gl.uniform1f(u.uCell,cv.width/cols);gl.uniform1f(u.uSrcAspect,source.aspect||1);gl.uniform1i(u.uPreset,preset);gl.uniform1i(u.uRippleCount,ripples.length);gl.uniform1i(u.uMirror,source.mirror?1:0);
+  const rd=new Float32Array(32);ripples.forEach((r,i)=>rd.set(r,i*4));gl.uniform4fv(u.uRipples,rd);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,srcTex);gl.uniform1i(u.uSrc,0);
+  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,prev.tex);gl.uniform1i(u.uPrev,1);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  // 2) 画面へコピー
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.useProgram(copy.p);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,target.tex);gl.uniform1i(copy.u.uTex,0);gl.uniform2f(copy.u.uRes,cv.width,cv.height);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  cur=1-cur;
+  requestAnimationFrame(frame);
+}
+resize();
+ripples.push([cv.width/2,cv.height*.42,0.3,0]);
+requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
